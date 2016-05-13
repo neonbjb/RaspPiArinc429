@@ -11,8 +11,26 @@ public class CDITest {
         System.out.println("Press any key to continue...");
         try {
             System.in.read();
-        }  
+        }
         catch(Exception e) {}  
+    }
+    
+    static void readLoop() {
+        try {
+            System.out.println("<-- Starting DEI1016 read loop program..");
+            DEI1016Driver driver = new DEI1016Driver();
+            driver.init();
+            pressAnyKeyToContinue();
+
+            while(true) {
+                while(!driver.isDataReadyRx1()) {
+                    Thread.sleep(50);
+                }
+                driver.readMessage();
+            }
+        }catch(Exception e) {
+            e.printStackTrace();
+        }
     }
     
     public static void main(String[] args) {
@@ -28,6 +46,8 @@ public class CDITest {
                 }*/
                 System.out.println("Writing message to DEI 1016");
                 driver.writeMessage(0x69696868);
+                driver.writeMessage(0x55553333);
+                driver.writeMessage(0x21322122);
                 pressAnyKeyToContinue();
                 while(driver.isDataReadyRx1()) {
                     System.out.println("Reading message buffer");

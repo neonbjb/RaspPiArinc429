@@ -19,17 +19,21 @@ import com.pi4j.wiringpi.Gpio;
  * @author James
  */
 public class DEI1016Driver extends Arinc429 {
-    MCP23017GpioProvider mcpProvider;
+    MCP23017Driver mcpDriver;
+    final int MCP_BUS_NO = 0x20;
     
     @Override
     public void init() {
+        mcpDriver = new MCP23017Driver(1, MCP_BUS_NO);
+        if(!mcpDriver.init()) {
+            System.err.println("Error initializing MCP23017 driver.");
+        }
         intializeDriver(true, false, false, false);
-        mcpProvider = null;
     }
 
     @Override
     public ArincMessage readMessage() {
-        setDataBusMode(true);
+        mcpDriver.configureDirection(true);
         
         this.writeReceiverWordSelect2(false);
         this.writeReceiver1Enable(false); // Drive low to enable.
@@ -63,8 +67,7 @@ public class DEI1016Driver extends Arinc429 {
     }
     
     public void writeMessage(int aDwordMsg) {
-        setDataBusMode(false);
-        
+        mcpDriver.configureDirection(false);        
         // Give transmitter 50ms to get ready.
         for(int i = 0; i < 5; i++) {
             if(readTransmitterReady()) {
@@ -132,7 +135,7 @@ public class DEI1016Driver extends Arinc429 {
         pinWrite(39, true);
         
         // Load control register
-        setDataBusMode(false);
+        mcpDriver.configureDirection(false);
         writeDataBus(configWord);
         pinWrite(34, false);
         nsPause(300);
@@ -156,40 +159,41 @@ public class DEI1016Driver extends Arinc429 {
     }
     
     protected void writeDataBus(int aWriteWord) {
-        int bitNum = 0;
-        int res = 0;
-        
-        // Pins 27-22 hold bits 0-5.
-        for(int i = 27; i >= 22; i--, bitNum++) {
-            boolean isPinEn = (((1 << bitNum) & aWriteWord) != 0);
-            pinWrite(i, isPinEn);
-        }
-        // Pins 20-11 hold the rest.
-        for(int i = 20; i >= 11; i--, bitNum++) {
-            boolean isPinEn = (((1 << bitNum) & aWriteWord) != 0);
-            pinWrite(i, isPinEn);
+        boolean res = false;
+        for(int i = 0; !res && i < 5; i++) {
+            res = mcpDriver.writeByteBankA(aWriteWord & 0xff) &&
+                  mcpDriver.writeByteBankB((aWriteWord & 0xff00) >> 8);
+            
+            if(!res) {
+                mcpDriver.reinitialize();
+                try {
+                    Thread.sleep(50);
+                } catch(Exception e) {
+                }
+            }
         }
     }
     
     protected int readDataBus() {
-        int bitNum = 0;
-        int res = 0;
-        
-        // Pins 27-22 hold bits 0-5.
-        for(int i = 27; i >= 22; i--, bitNum++) {
-            boolean dataPin = pinRead(i);
-            if(dataPin) {
-                res = res | (1 << bitNum);
+        boolean res = false;
+        int byteA = 0, byteB = 0;
+        for(int i = 0; !res && i < 5; i++) {
+            byteA = mcpDriver.readByteBankA();
+            byteB = mcpDriver.readByteBankB();
+            res = (byteA != MCP23017Driver.INVALID_READ && byteB != MCP23017Driver.INVALID_READ);
+            
+            if(!res) {
+                mcpDriver.reinitialize();
+                try {
+                    Thread.sleep(50);
+                } catch(Exception e) {
+                }
             }
         }
-        // Pins 20-11 hold the rest.
-        for(int i = 20; i >= 11; i--, bitNum++) {
-            boolean dataPin = pinRead(i);
-            if(dataPin) {
-                res = res | (1 << bitNum);
-            }
+        if(res) {
+            return byteA | (byteB << 8);
         }
-        return res;
+        return 0;
     }
     
     protected boolean readDataReady1() {
@@ -273,23 +277,23 @@ public class DEI1016Driver extends Arinc429 {
         29, // 8
         25, // 9 Output Enable RX1
         -1, // 1-1 N/A - Output Enable RX2
-        107, // 11
-        106, // 12
-        105, // 13
-        104, // 14
-        103, // 15
-        102, // 16
-        101, // 17
-        100, // 18
-        57, // 19
-        56, // 20
+        -1, // 11 Data pins are hooked to the MCP23017.
+        -1, // 12 Data pins are hooked to the MCP23017.
+        -1, // 13 Data pins are hooked to the MCP23017.
+        -1, // 14 Data pins are hooked to the MCP23017.
+        -1, // 15 Data pins are hooked to the MCP23017.
+        -1, // 16 Data pins are hooked to the MCP23017.
+        -1, // 17 Data pins are hooked to the MCP23017.
+        -1, // 18 Data pins are hooked to the MCP23017.
+        -1, // 19 Data pins are hooked to the MCP23017.
+        -1, // 20 Data pins are hooked to the MCP23017.
         -1, // 21 N/A - Gnd
-        55, // 22
-        54, // 23
-        53, // 24
-        52, // 25
-        51, // 26
-        50, // 27
+        -1, // 22 Data pins are hooked to the MCP23017.
+        -1, // 23 Data pins are hooked to the MCP23017.
+        -1, // 24 Data pins are hooked to the MCP23017.
+        -1, // 25 Data pins are hooked to the MCP23017.
+        -1, // 26 Data pins are hooked to the MCP23017.
+        -1, // 27 Data pins are hooked to the MCP23017.
         24, // 28
         23, // 29
         22, // 30 (TXR)
@@ -323,185 +327,25 @@ public class DEI1016Driver extends Arinc429 {
         return mPinsInUse[pinNumber];
     }
     
-    final int MCP_BUS_NO = 0x20;
-    
-    /**
-     * This method sets the pin mode of the data bus. It must be called every time the
-     * data bus is used, before it is used.
-     * @param aIsInput 
-     */
-    protected void setDataBusMode(boolean aIsInput) {
-        final int[] dataBusDeiPins = { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27 };
-        if(dataBusDeiPins.length != 16) { System.err.println("setDataBusMode: Pin count is wrong - it wont work right."); }
-        
-        for(int deiPin : dataBusDeiPins) {
-            // We cannot fail this operation.. keep iterating until it succeeds (or die trying).
-            boolean pinModeSet = false;
-            while(!pinModeSet) {
-                // Assumption: Data bus is all MCP23017
-                int mcpPinNo = getMCP23017PinNumber(deiPin);
-                boolean isBankA = isMCP23017PinBankA(deiPin);
-                int mcpPinNoAdj = mcpPinNo;
-                if(!isBankA) {
-                    mcpPinNoAdj -= 8;
-                }
-                Pin mcpPin = getMCP23017Pin(mcpPinNoAdj, isBankA);
-                
-                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
-                try {
-                    if(multiPin == null) {
-                        if(mcpProvider == null) {
-                            restartMCP23017();
-                        }
-                        mMcpPins[mcpPinNo] = GpioFactory.getInstance().provisionDigitalMultipurposePin(mcpProvider, mcpPin, aIsInput ? PinMode.DIGITAL_INPUT : PinMode.DIGITAL_OUTPUT, PinPullResistance.OFF);
-                    }else{
-                        if(aIsInput) {
-                            multiPin.setMode(PinMode.DIGITAL_INPUT);
-                        } else {
-                            multiPin.setMode(PinMode.DIGITAL_OUTPUT);
-                        }
-                    }
-                    pinModeSet = true;
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    restartMCP23017();
-                }
-            }
-        }
-        
-    }
-    
     static int i2cErrorCounter = 0;
     protected void pinWrite(int aDeiPinNumber, boolean aHigh) {
-        if(isMCP23017Pin(aDeiPinNumber)) {
-            int mcpPinNo = getMCP23017PinNumber(aDeiPinNumber);
-            
-            // Writing to the MCP requires a lot of special precautions - this guy likes to crash a lot.
-            try {
-                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
-                if(aHigh) {
-                    multiPin.setState(PinState.HIGH);
-                } else {
-                    multiPin.setState(PinState.LOW);
-                }
-            } catch(Exception e) {
-                restartMCP23017();
-            }
+        GpioPinDigitalMultipurpose pin = provisionAsNecessary(aDeiPinNumber);
+        pin.setMode(PinMode.DIGITAL_OUTPUT);
+        if(aHigh) {
+            pin.high();
         } else {
-            GpioPinDigitalMultipurpose pin = provisionAsNecessary(aDeiPinNumber);
-            pin.setMode(PinMode.DIGITAL_OUTPUT);
-            if(aHigh) {
-                pin.high();
-            } else {
-                pin.low();
-            }
+            pin.low();
         }
     }
     
     protected boolean pinRead(int aDeiPinNumber) {
-        if(isMCP23017Pin(aDeiPinNumber)) {
-            int mcpPinNo = getMCP23017PinNumber(aDeiPinNumber);
-            
-            // Writing to the MCP requires a lot of special precautions - this guy likes to crash a lot.
-            try {
-                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
-                return multiPin.isHigh();
-            } catch(Exception e) {
-                restartMCP23017();
-            }
-            System.err.println("Did not read MCP pin due to I2C failure. Returning low.");
-            return false;
-        } else {
-            GpioPinDigitalMultipurpose pin = provisionAsNecessary(aDeiPinNumber);
-            pin.setMode(PinMode.DIGITAL_INPUT);
-            pin.setPullResistance(PinPullResistance.PULL_DOWN);
-            if(pin.isHigh() && aDeiPinNumber != 6) {
-                System.out.println("DEI Pin " + aDeiPinNumber + " [rpi=" + DEI_PIN_TO_HOST_GPIO_NUM_MAP[aDeiPinNumber] + "] is HIGH");
-            }
-            return pin.isHigh();
+        GpioPinDigitalMultipurpose pin = provisionAsNecessary(aDeiPinNumber);
+        pin.setMode(PinMode.DIGITAL_INPUT);
+        pin.setPullResistance(PinPullResistance.PULL_DOWN);
+        if(pin.isHigh() && aDeiPinNumber != 6) {
+            System.out.println("DEI Pin " + aDeiPinNumber + " [rpi=" + DEI_PIN_TO_HOST_GPIO_NUM_MAP[aDeiPinNumber] + "] is HIGH");
         }
-    }
-    
-    protected boolean restartMCP23017() {
-        // When using the MCP23017, failures occasionally occur - when they do, reset the provider.
-        try {
-            if(mcpProvider != null) {
-                System.err.println(i2cErrorCounter++ + ". I2C Error, Resetting MCP23017.");
-                mcpProvider.shutdown();
-            }
-        }catch(Exception ex) {
-            ex.printStackTrace();
-        }
-        mcpProvider = null;
-        while(mcpProvider == null) {
-            try {
-                mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                return true;
-            }catch(Exception ex) {
-                System.err.println(i2cErrorCounter++ + ". I2C Error, re-trying to fetch MCP23017.");
-            }
-            try {
-                Thread.sleep(100);
-            }catch(Exception ex2) {
-
-            }
-        }
-        return false;
-    }
-    
-    boolean isMCP23017Pin(int aDeiPinNumber) {
-        return DEI_PIN_TO_HOST_GPIO_NUM_MAP[aDeiPinNumber] >= 50;
-    }
-    
-    /*
-     Returns whether or not the specified DEI pin is on the MCP23017 bank A,
-     but does not check whether it is an MCP23017 pin in the first place.
-    */
-    boolean isMCP23017PinBankA(int aDeiPinNumber) {
-        return DEI_PIN_TO_HOST_GPIO_NUM_MAP[aDeiPinNumber] < 100;
-    }
-    
-    /**
-     * Returns the mapped pin number on the MCP23017, assuming this pin is FOR
-     * the MCP23017.
-     * @param aDeiPinNumber The DEP pin number.
-     * @param aAdjusted When flagged, 8 is subtracted from the number for bank B.
-     * @return 
-     */
-    int getMCP23017PinNumber(int aDeiPinNumber) {
-        int mapping = DEI_PIN_TO_HOST_GPIO_NUM_MAP[aDeiPinNumber];
-        if(isMCP23017PinBankA(aDeiPinNumber)) {
-            return mapping - 50;
-        }
-        return mapping - 100 + 8;
-    }
-    
-    protected Pin getMCP23017Pin(int aNum, boolean aIsBankA) {
-        if(aIsBankA) {
-            switch(aNum) {
-                case 0: return MCP23017Pin.GPIO_A0;
-                case 1: return MCP23017Pin.GPIO_A1;
-                case 2: return MCP23017Pin.GPIO_A2;
-                case 3: return MCP23017Pin.GPIO_A3;
-                case 4: return MCP23017Pin.GPIO_A4;
-                case 5: return MCP23017Pin.GPIO_A5;
-                case 6: return MCP23017Pin.GPIO_A6;
-                case 7: return MCP23017Pin.GPIO_A7;
-            }
-        } else {
-            switch(aNum) {
-                case 0: return MCP23017Pin.GPIO_B0;
-                case 1: return MCP23017Pin.GPIO_B1;
-                case 2: return MCP23017Pin.GPIO_B2;
-                case 3: return MCP23017Pin.GPIO_B3;
-                case 4: return MCP23017Pin.GPIO_B4;
-                case 5: return MCP23017Pin.GPIO_B5;
-                case 6: return MCP23017Pin.GPIO_B6;
-                case 7: return MCP23017Pin.GPIO_B7;
-            }
-        }
-        System.err.println("Error: Cannot map pin " + aNum + " to a MCP23017 pin on bank " + aIsBankA);
-        return MCP23017Pin.GPIO_A0;
+        return pin.isHigh();
     }
     
     /**
