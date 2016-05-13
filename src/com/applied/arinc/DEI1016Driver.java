@@ -31,21 +31,22 @@ public class DEI1016Driver extends Arinc429 {
     public ArincMessage readMessage() {
         setDataBusMode(true);
         
-        this.writeReceiverWordSelect(false);
-        this.writeReceiver1Enable(true);
+        this.writeReceiverWordSelect2(false);
+        this.writeReceiver1Enable(false); // Drive low to enable.
         this.nsPause(200);
-        this.writeReceiver1Enable(false);
         int rxWord1 = this.readDataBus();
+        this.writeReceiver1Enable(true);
         this.nsPause(50);
         
-        this.writeReceiverWordSelect(true);
-        this.writeReceiver1Enable(true);
+        this.writeReceiverWordSelect2(true);
+        this.nsPause(200);
+        this.writeReceiver1Enable(false);
         this.nsPause(200);
         int rxWord2 = this.readDataBus();
-        this.writeReceiver1Enable(false);
+        this.writeReceiver1Enable(true);
         this.nsPause(50);
         
-        this.writeReceiverWordSelect(false);
+        this.writeReceiverWordSelect2(false);
         
         int dword = (rxWord2 << 16) | rxWord1;
         System.out.println("Got msg: " + Integer.toHexString(dword));
@@ -54,8 +55,48 @@ public class DEI1016Driver extends Arinc429 {
 
     @Override
     public void writeMessage(ArincMessage aMsg) {
+        writeMessage(packetize(aMsg));
+    }
+    
+    private int packetize(ArincMessage aMsg) {
+        return 0;
+    }
+    
+    public void writeMessage(int aDwordMsg) {
         setDataBusMode(false);
         
+        // Give transmitter 50ms to get ready.
+        for(int i = 0; i < 5; i++) {
+            if(readTransmitterReady()) {
+                break;
+            }
+        }
+        if(!readTransmitterReady()) {
+            System.err.println("DEI 1016 transmitter is not signalling that it is ready. Abort.");
+            return;
+        }
+        
+        // Disable transmitter, which puts it into word loading mode.
+        writeEnableTransmitter(false);
+        nsPause(100);
+        
+        // Load word 1.
+        writeDataBus(aDwordMsg & 0xffff);
+        nsPause(100);
+        pulseLoadTxWord1();
+        nsPause(100);
+        
+        // Load word 2.
+        writeDataBus((aDwordMsg >> 16) & 0xffff);
+        nsPause(100);
+        pulseLoadTxWord2();
+        nsPause(100);
+        
+        // Re-enable transmitter.
+        writeEnableTransmitter(true);
+        
+        // Clear out data bus
+        //writeDataBus(0);
     }
     
     public boolean isDataReadyRx1() {
@@ -78,7 +119,12 @@ public class DEI1016Driver extends Arinc429 {
                 (aTransmitterRateLo ?  0xffff : 0 ) & 0x2000 | // Bit 13
                 (aParityCheckEnable ?  0xffff : 0 ) & 0x1000 | // Bit 12
                 (aTransmitterParityEnabled ?  0xff : 0 ) & 0x10 | // Bit 4
-                0x20; // Disable self test.
+                
+                //0x20; // Disable self test.
+                0x0; // Enable self test.
+        
+        // Configure output pins to drive high by default (most of them, at least)
+        resetOutputPins();
         
         // Do a chip reset.
         pinWrite(39, false);
@@ -98,16 +144,15 @@ public class DEI1016Driver extends Arinc429 {
     ////////////////////////////////////////////////////////////////////
     
     /**
-     * Resets all output (from the host computer) pins to digital low.
+     * Resets all output (from the host computer) pins to digital high.
      */
     protected void resetOutputPins() {
-        pinWrite(8, false);
-        pinWrite(9, false);
-        pinWrite(10, false);
-        pinWrite(28, false);
-        pinWrite(29, false);
-        pinWrite(33, false);
-        pinWrite(34, false);
+        pinWrite(9, true); // Enable RX1
+        pinWrite(28, true); // Load word 1
+        pinWrite(29, true); // Load word 2
+        pinWrite(33, true); // Enable TX (when low, data pins are locked in input mode)
+        pinWrite(34, true); // Load CW
+        pinWrite(39, true); // Reset
     }
     
     protected void writeDataBus(int aWriteWord) {
@@ -155,10 +200,10 @@ public class DEI1016Driver extends Arinc429 {
         return pinRead(7);
     }
     
-    protected void writeReceiverWordSelect(boolean aSelectWord2) {
+    protected void writeReceiverWordSelect2(boolean aSelectWord2) {
         // These are pull-down GPIOs as wired to the DEI1016 - low value selects 1, high selects 2.
         // so, inversion is needed.
-        pinWrite(8, !aSelectWord2);
+        pinWrite(8, aSelectWord2);
     }
     
     protected void writeReceiver1Enable(boolean aEnableRx1) {
@@ -174,9 +219,9 @@ public class DEI1016Driver extends Arinc429 {
      * data bus contents to the transmit buffer for word 1.
      */
     protected void pulseLoadTxWord1() {
-        pinWrite(28, true);
-        nsPause(130);
         pinWrite(28, false);
+        nsPause(130);
+        pinWrite(28, true);
     }
     
     /**
@@ -184,9 +229,9 @@ public class DEI1016Driver extends Arinc429 {
      * data bus contents to the transmit buffer for word 2.
      */
     protected void pulseLoadTxWord2() {
-        pinWrite(29, true);
-        nsPause(130);
         pinWrite(29, false);
+        nsPause(130);
+        pinWrite(29, true);
     }
     
     protected boolean readTransmitterReady() {
@@ -202,9 +247,9 @@ public class DEI1016Driver extends Arinc429 {
      * data bus contents to the control register.
      */
     protected void pulseLoadControlRegister() {
-        pinWrite(34, true);
-        nsPause(130);
         pinWrite(34, false);
+        nsPause(130);
+        pinWrite(34, true);
     }
     
     ////////////////////////////////////////////////////////////////////
@@ -226,7 +271,7 @@ public class DEI1016Driver extends Arinc429 {
         28, // 6
         -1, // 7 N/A - Data Ready RX2 (Should be enabled if used)
         29, // 8
-        25, // 9
+        25, // 9 Output Enable RX1
         -1, // 1-1 N/A - Output Enable RX2
         107, // 11
         106, // 12
@@ -247,7 +292,7 @@ public class DEI1016Driver extends Arinc429 {
         50, // 27
         24, // 28
         23, // 29
-        22, // 30
+        22, // 30 (TXR)
         -1, // 31 N/A - ARINC Output
         -1, // 32 N/A - ARINC Output
         3, // 33
@@ -261,6 +306,7 @@ public class DEI1016Driver extends Arinc429 {
     };
     
     GpioPinDigitalMultipurpose[] mPinsInUse = new GpioPinDigitalMultipurpose[Gpio.NUM_PINS];
+    GpioPinDigitalMultipurpose[] mMcpPins = new GpioPinDigitalMultipurpose[16]; // First 8 are bank A, second 8 are bank B.
     
     //! If the specified pin is already provisioned to this driver, return it,
     //! if not, provision it first, then return it.
@@ -279,44 +325,46 @@ public class DEI1016Driver extends Arinc429 {
     
     final int MCP_BUS_NO = 0x20;
     
+    /**
+     * This method sets the pin mode of the data bus. It must be called every time the
+     * data bus is used, before it is used.
+     * @param aIsInput 
+     */
     protected void setDataBusMode(boolean aIsInput) {
         final int[] dataBusDeiPins = { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27 };
         if(dataBusDeiPins.length != 16) { System.err.println("setDataBusMode: Pin count is wrong - it wont work right."); }
         
         for(int deiPin : dataBusDeiPins) {
-            // Assumption: Data bus is all MCP23017
-            int mcpPinNo = getMCP23017PinNumber(deiPin);
-            boolean isBankA = isMCP23017PinBankA(deiPin);
-            Pin mcpPin = getMCP23017Pin(mcpPinNo, isBankA);
-            try {
-                if(mcpProvider == null) {
-                    mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
+            // We cannot fail this operation.. keep iterating until it succeeds (or die trying).
+            boolean pinModeSet = false;
+            while(!pinModeSet) {
+                // Assumption: Data bus is all MCP23017
+                int mcpPinNo = getMCP23017PinNumber(deiPin);
+                boolean isBankA = isMCP23017PinBankA(deiPin);
+                int mcpPinNoAdj = mcpPinNo;
+                if(!isBankA) {
+                    mcpPinNoAdj -= 8;
                 }
-                if(aIsInput) { 
-                    mcpProvider.setMode(mcpPin, PinMode.DIGITAL_INPUT);
-                } else {
-                    mcpProvider.setMode(mcpPin, PinMode.DIGITAL_OUTPUT);
-                }
-            } catch(Exception e) {
-                System.err.println(i2cErrorCounter++ + ". I2C Error, Resetting MCP23017.");
-                // When using the MCP23017, failures occasionally occur - when they do, reset the provider and re-fetch the pins.
+                Pin mcpPin = getMCP23017Pin(mcpPinNoAdj, isBankA);
+                
+                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
                 try {
-                    mcpProvider.shutdown();
-                }catch(Exception ex) {
-                    ex.printStackTrace();
-                }
-                mcpProvider = null;
-                while(mcpProvider == null) {
-                    try {
-                        mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                    }catch(Exception ex) {
-                        System.err.println(i2cErrorCounter++ + ". I2C Error, re-trying to fetch MCP23017.");
+                    if(multiPin == null) {
+                        if(mcpProvider == null) {
+                            restartMCP23017();
+                        }
+                        mMcpPins[mcpPinNo] = GpioFactory.getInstance().provisionDigitalMultipurposePin(mcpProvider, mcpPin, aIsInput ? PinMode.DIGITAL_INPUT : PinMode.DIGITAL_OUTPUT, PinPullResistance.OFF);
+                    }else{
+                        if(aIsInput) {
+                            multiPin.setMode(PinMode.DIGITAL_INPUT);
+                        } else {
+                            multiPin.setMode(PinMode.DIGITAL_OUTPUT);
+                        }
                     }
-                    try {
-                        Thread.sleep(100);
-                    }catch(Exception ex2) {
-
-                    }
+                    pinModeSet = true;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    restartMCP23017();
                 }
             }
         }
@@ -327,40 +375,17 @@ public class DEI1016Driver extends Arinc429 {
     protected void pinWrite(int aDeiPinNumber, boolean aHigh) {
         if(isMCP23017Pin(aDeiPinNumber)) {
             int mcpPinNo = getMCP23017PinNumber(aDeiPinNumber);
-            boolean isBankA = isMCP23017PinBankA(aDeiPinNumber);
-            Pin mcpPin = getMCP23017Pin(mcpPinNo, isBankA);
+            
             // Writing to the MCP requires a lot of special precautions - this guy likes to crash a lot.
             try {
-                if(mcpProvider == null) {
-                    mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                }
-                mcpProvider.setMode(mcpPin, PinMode.DIGITAL_OUTPUT);
+                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
                 if(aHigh) {
-                    mcpProvider.setState(mcpPin, PinState.HIGH);
+                    multiPin.setState(PinState.HIGH);
                 } else {
-                    mcpProvider.setState(mcpPin, PinState.LOW);
+                    multiPin.setState(PinState.LOW);
                 }
             } catch(Exception e) {
-                System.err.println(i2cErrorCounter++ + ". I2C Error, Resetting MCP23017.");
-                // When using the MCP23017, failures occasionally occur - when they do, reset the provider and re-fetch the pins.
-                try {
-                    mcpProvider.shutdown();
-                }catch(Exception ex) {
-                    ex.printStackTrace();
-                }
-                mcpProvider = null;
-                while(mcpProvider == null) {
-                    try {
-                        mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                    }catch(Exception ex) {
-                        System.err.println(i2cErrorCounter++ + ". I2C Error, re-trying to fetch MCP23017.");
-                    }
-                    try {
-                        Thread.sleep(100);
-                    }catch(Exception ex2) {
-                        
-                    }
-                }
+                restartMCP23017();
             }
         } else {
             GpioPinDigitalMultipurpose pin = provisionAsNecessary(aDeiPinNumber);
@@ -376,38 +401,13 @@ public class DEI1016Driver extends Arinc429 {
     protected boolean pinRead(int aDeiPinNumber) {
         if(isMCP23017Pin(aDeiPinNumber)) {
             int mcpPinNo = getMCP23017PinNumber(aDeiPinNumber);
-            boolean isBankA = isMCP23017PinBankA(aDeiPinNumber);
-            Pin mcpPin = getMCP23017Pin(mcpPinNo, isBankA);
+            
             // Writing to the MCP requires a lot of special precautions - this guy likes to crash a lot.
             try {
-                if(mcpProvider == null) {
-                    mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                }
-                mcpProvider.setMode(mcpPin, PinMode.DIGITAL_INPUT);
-                boolean result = (mcpProvider.getState(mcpPin) == PinState.HIGH);
-                //System.out.println("mcp pinRead - " + mcpPinNo + ": " + result);
-                return result;
+                GpioPinDigitalMultipurpose multiPin = mMcpPins[mcpPinNo];
+                return multiPin.isHigh();
             } catch(Exception e) {
-                System.err.println(i2cErrorCounter++ + ". I2C Error, Resetting MCP23017.");
-                // When using the MCP23017, failures occasionally occur - when they do, reset the provider and re-fetch the pins.
-                try {
-                    mcpProvider.shutdown();
-                }catch(Exception ex) {
-                    ex.printStackTrace();
-                }
-                mcpProvider = null;
-                while(mcpProvider == null) {
-                    try {
-                        mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
-                    }catch(Exception ex) {
-                        System.err.println(i2cErrorCounter++ + ". I2C Error, re-trying to fetch MCP23017.");
-                    }
-                    try {
-                        Thread.sleep(100);
-                    }catch(Exception ex2) {
-                        
-                    }
-                }
+                restartMCP23017();
             }
             System.err.println("Did not read MCP pin due to I2C failure. Returning low.");
             return false;
@@ -420,6 +420,33 @@ public class DEI1016Driver extends Arinc429 {
             }
             return pin.isHigh();
         }
+    }
+    
+    protected boolean restartMCP23017() {
+        // When using the MCP23017, failures occasionally occur - when they do, reset the provider.
+        try {
+            if(mcpProvider != null) {
+                System.err.println(i2cErrorCounter++ + ". I2C Error, Resetting MCP23017.");
+                mcpProvider.shutdown();
+            }
+        }catch(Exception ex) {
+            ex.printStackTrace();
+        }
+        mcpProvider = null;
+        while(mcpProvider == null) {
+            try {
+                mcpProvider = new MCP23017GpioProvider(I2CBus.BUS_1, MCP_BUS_NO);
+                return true;
+            }catch(Exception ex) {
+                System.err.println(i2cErrorCounter++ + ". I2C Error, re-trying to fetch MCP23017.");
+            }
+            try {
+                Thread.sleep(100);
+            }catch(Exception ex2) {
+
+            }
+        }
+        return false;
     }
     
     boolean isMCP23017Pin(int aDeiPinNumber) {
@@ -438,6 +465,7 @@ public class DEI1016Driver extends Arinc429 {
      * Returns the mapped pin number on the MCP23017, assuming this pin is FOR
      * the MCP23017.
      * @param aDeiPinNumber The DEP pin number.
+     * @param aAdjusted When flagged, 8 is subtracted from the number for bank B.
      * @return 
      */
     int getMCP23017PinNumber(int aDeiPinNumber) {
@@ -445,7 +473,7 @@ public class DEI1016Driver extends Arinc429 {
         if(isMCP23017PinBankA(aDeiPinNumber)) {
             return mapping - 50;
         }
-        return mapping - 100;
+        return mapping - 100 + 8;
     }
     
     protected Pin getMCP23017Pin(int aNum, boolean aIsBankA) {

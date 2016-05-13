@@ -26,8 +26,14 @@ public class CDITest {
                 /*while(!driver.isDataReadyRx1()) {
                     Thread.sleep(50);
                 }*/
-                driver.readMessage();
-                Thread.sleep(500);
+                System.out.println("Writing message to DEI 1016");
+                driver.writeMessage(0x69696868);
+                pressAnyKeyToContinue();
+                while(driver.isDataReadyRx1()) {
+                    System.out.println("Reading message buffer");
+                    driver.readMessage();
+                }
+                pressAnyKeyToContinue();
             }
             
             /*
