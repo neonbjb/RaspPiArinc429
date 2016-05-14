@@ -104,7 +104,6 @@ public class MCP23017Driver {
             }
             mDevice.write(REGISTER_IODIR_A, (byte) currentDirection);
             mDevice.write(REGISTER_IODIR_B, (byte) currentDirection);
-            System.out.println("Successfully set io direction: " + aIsInputMode);
             mIsInputMode = aIsInputMode;
             return true;
         }catch(Exception e) {

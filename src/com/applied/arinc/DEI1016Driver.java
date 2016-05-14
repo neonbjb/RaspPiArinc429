@@ -123,8 +123,8 @@ public class DEI1016Driver extends Arinc429 {
                 (aParityCheckEnable ?  0xffff : 0 ) & 0x1000 | // Bit 12
                 (aTransmitterParityEnabled ?  0xff : 0 ) & 0x10 | // Bit 4
                 
-                //0x20; // Disable self test.
-                0x0; // Enable self test.
+                0x20; // Disable self test.
+                //0x0; // Enable self test.
         
         // Configure output pins to drive high by default (most of them, at least)
         resetOutputPins();

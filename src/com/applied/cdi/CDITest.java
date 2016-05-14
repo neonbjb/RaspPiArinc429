@@ -34,6 +34,8 @@ public class CDITest {
     }
     
     public static void main(String[] args) {
+        readLoop();
+        
         try {
             System.out.println("<-- Starting DEI1016 test program..");
             DEI1016Driver driver = new DEI1016Driver();
@@ -44,7 +46,7 @@ public class CDITest {
                 /*while(!driver.isDataReadyRx1()) {
                     Thread.sleep(50);
                 }*/
-                System.out.println("Writing message to DEI 1016");
+                System.out.println("Writing 3 messages to DEI 1016");
                 driver.writeMessage(0x69696868);
                 driver.writeMessage(0x55553333);
                 driver.writeMessage(0x21322122);

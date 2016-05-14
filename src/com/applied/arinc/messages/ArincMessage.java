@@ -1,11 +1,14 @@
 package com.applied.arinc.messages;
 
+import java.io.PrintWriter;
+
 /**
  * Offers access to things that all Arinc messages share in common. Superclass to
  * all Arinc message types.
  * @author James
  */
 public class ArincMessage {
+    static PrintWriter pwLog = null;
     
     /**
      * Constructs an ARINC message from it's constituent parts:
@@ -33,6 +36,16 @@ public class ArincMessage {
      * @return A constructed ArincMessage object processed from the given frame.
      */
     public static ArincMessage processArincFrame(int aFrame) {
+        if(pwLog == null){
+            try{
+                pwLog = new PrintWriter("deiLog.log");
+            }catch(Exception e){
+                e.printStackTrace();
+            }
+        }
+        pwLog.println(Integer.toHexString(aFrame));
+        pwLog.flush();
+        
         int label = binaryReverse(aFrame & 0xff, 8);
         int sign = binaryReverse((aFrame & 0x300) >> 8, 2);
         int data = binaryReverse((aFrame & 0x1ffffc00) >> 10, 19);

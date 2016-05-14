@@ -1,1 +1,1 @@
-scp dist/JavaArinc.jar betker@10.0.0.165:/home/betker
+scp dist/JavaArinc.jar betker@192.168.43.17:/home/betker
