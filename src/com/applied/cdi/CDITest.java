@@ -1,6 +1,8 @@
 package com.applied.cdi;
 
+import com.applied.arinc.Arinc429FileSimulator;
 import com.applied.arinc.DEI1016Driver;
+import com.applied.arinc.messages.ArincMessage;
 
 /**
  *
@@ -13,6 +15,17 @@ public class CDITest {
             System.in.read();
         }
         catch(Exception e) {}  
+    }
+    
+    static void simLoop() {
+        try{
+            Arinc429FileSimulator sim = new Arinc429FileSimulator("deiLog.log");
+            while(true) {
+                ArincMessage msg = sim.readMessage();
+            }
+        }catch(Exception e) {
+            e.printStackTrace();
+        }
     }
     
     static void readLoop() {
@@ -34,6 +47,8 @@ public class CDITest {
     }
     
     public static void main(String[] args) {
+        simLoop();
+        
         try {
             System.out.println("<-- Starting DEI1016 test program..");
             DEI1016Driver driver = new DEI1016Driver();

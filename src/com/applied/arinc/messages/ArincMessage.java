@@ -13,11 +13,22 @@ public class ArincMessage {
      * @param aSignStatus 2-bit item which modifies the data.
      * @param aData  19-bit item which carries the data field of the message.
      */
-    private ArincMessage(int aLabel, int aSignStatus, int aData) {
+    protected ArincMessage(int aLabel, int aSignStatus, int aData) {
         mLabel = aLabel;
         mSign = aSignStatus;
         mData = aData;
     }
+    
+    static final int ADF_FREQUENCY_MSG = 032;
+    static final int ILS_FREQUENCY_MSG = 033;
+    static final int VOR_ILS_FREQUENCY_MSG = 034;
+    static final int DME_FREQUENCY_MSG = 035;
+    static final int SELECTED_COURSE_MSG = 0100;
+    static final int LOCALIZER_DEVIATION_MSG = 0173;
+    static final int GLIDESLOPE_DEVIATION_MSG = 0174;
+    static final int OMNI_BEARING_MSG = 0222;
+    static final int EQUIPMENT_DESC_MSG = 0371;
+    
     
     /**
      * Processes a full ARINC frame into an ArincMessage object that describes it.
@@ -35,9 +46,33 @@ public class ArincMessage {
     public static ArincMessage processArincFrame(int aFrame) {
         int label = binaryReverse(aFrame & 0xff, 8);
         int sign = binaryReverse((aFrame & 0x300) >> 8, 2);
-        int data = binaryReverse((aFrame & 0x1ffffc00) >> 10, 19);
+        int data = binaryReverse((aFrame & 0xffffe000) >> 10, 19);
         
-        return new ArincMessage(label, sign, data);
+        switch(label) {
+            case ADF_FREQUENCY_MSG:
+                return new ArincFrequencyMessage(label, sign, data, ArincFrequencyMessage.FrequencyType.ADF);
+            case ILS_FREQUENCY_MSG:
+                return new ArincFrequencyMessage(label, sign, data, ArincFrequencyMessage.FrequencyType.ILS);
+            case VOR_ILS_FREQUENCY_MSG:
+                return new ArincFrequencyMessage(label, sign, data, ArincFrequencyMessage.FrequencyType.VOR_ILS);
+            case DME_FREQUENCY_MSG:
+                return new ArincFrequencyMessage(label, sign, data, ArincFrequencyMessage.FrequencyType.DME);
+            case SELECTED_COURSE_MSG:            
+                return new ArincSelectedCourseMessage(label, sign, data);
+            case LOCALIZER_DEVIATION_MSG:
+                return new ArincMessageDeviation(label, sign, data, ArincMessageDeviation.DeviationType.Localizer);
+            case GLIDESLOPE_DEVIATION_MSG:
+                return new ArincMessageDeviation(label, sign, data, ArincMessageDeviation.DeviationType.Glideslope);
+            case OMNI_BEARING_MSG:
+                return new ArincOmniBearingMessage(label, sign, data);
+            case EQUIPMENT_DESC_MSG:
+                // Not supported.
+                return null;
+            default:
+                System.out.println("Could not process message: " + Integer.toOctalString(label));
+                break;
+        }
+        return null;
     }
     
     /**
@@ -53,7 +88,7 @@ public class ArincMessage {
      * @return 
      */
     public String getName() {
-        return Integer.toString(mLabel);
+        return Integer.toOctalString(mLabel);
     }
     
     public int getData() {
@@ -94,6 +129,23 @@ public class ArincMessage {
      */
     protected static int binaryReverse(int aValue, int aBits) {
         return aValue;
+    }
+    
+    /**
+     * Utility method used by subclasses to fetch n-bits from the data, starting
+     * at aStart.
+     * @param aBitCount
+     * @param aStart
+     * @param aEnd
+     * @return 
+     */
+    protected int getNBit(int aBitCount, int aStart) {
+        int shiftData = mData >> aStart;
+        int mask = 0;
+        for(int i = 0; i < aBitCount; i++) {
+            mask = mask | (1 << i);
+        }
+        return (shiftData & mask);
     }
     
     private int mLabel;
